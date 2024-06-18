@@ -1,25 +1,47 @@
-def fill_weighted_average_updown(df):
-    # 对每个空缺值进行处理
-    #filled_df = df.copy()
-    filled_df = df
-    for col in range(len(df.columns)):
-        for i in range(len(df)):
-            if pd.isnull(df.iloc[i, col]):
-                try:
-                    non_null_indices = df.iloc[:, col].notnull()
-                    column1 = df.iloc[i,:].notnull()
-                    total_column = df.notnull()
-                    result_indices = ((column1 & total_column).sum(axis=1) >0) & non_null_indices
-                    if result_indices.sum() ==0:
-                        continue
-                    prev_idx = result_indices.idxmax()
-                    column_next_idx = (column1 & total_column).iloc[i,:].idxmax()
-                    prev_prev_time = time_to_seconds(df.loc[prev_idx, column_next_idx])
-                    prev_next_time = time_to_seconds(df.iloc[prev_idx, col])
-                    this_next_time = time_to_seconds(df.loc[i,column_next_idx])
-                    # 计算加权平均
-                    filled_time = this_next_time + (prev_next_time - prev_prev_time)
-                    filled_df.iloc[i, col]  = seconds_to_time(filled_time)
-                except:
-                    continue
-    return filled_df
+import matplotlib.pyplot as plt
+import numpy as np
+from matplotlib.font_manager import FontProperties
+
+# 指定自定义字体文件路径
+custom_font = FontProperties(fname='/root/mnt/bus_corr/STSong.ttf')
+
+# 路段的端点坐标
+segment_coordinates = {
+    '1': (30, 29),
+    '2': (31, 31),
+    '3': (25, 25),
+    '5': (15, 40)
+}
+
+# 路段上的人数
+segment_population = {
+    '1_2': 30,
+    '3_5': 30
+}
+
+# 计算每条路段的中心坐标和人数
+segment_centers = {}
+segment_populations = []
+for key, value in segment_population.items():
+    seg_start, seg_end = key.split('_')
+    x1, y1 = segment_coordinates[seg_start]
+    x2, y2 = segment_coordinates[seg_end]
+    center_x = (x1 + x2) / 2
+    center_y = (y1 + y2) / 2
+    segment_centers[key] = (center_x, center_y)
+    segment_populations.append(value)
+
+# 提取坐标和人数
+x_coords, y_coords = zip(*segment_centers.values())
+populations = np.array(segment_populations)
+
+# 绘制热力图
+plt.figure(figsize=(10, 8))
+plt.scatter(x_coords, y_coords, s=populations*10, c=populations, cmap='hot', alpha=0.6)
+plt.colorbar(label='人数')
+plt.xlabel('X 坐标')
+plt.ylabel('Y 坐标')
+plt.title('路段热力图')
+plt.grid(True)
+plt.tight_layout()
+plt.show()
