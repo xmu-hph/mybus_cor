@@ -159,7 +159,7 @@ class simu():
                                      left_on=['this_od_trip_start_station', 'hour', 'minute_group'],\
                                      right_on = ['this_od_trip_start_station', 'hour', 'minute_group'],\
                                      how='left').fillna(0)
-        now_station_routes_and_nums['users'] = now_station_routes_and_nums.apply(lambda x:uniform_sample(x),axis=1)
+        now_station_routes_and_nums['users'] = now_station_routes_and_nums.apply(lambda x:uniform_sample(x,self.time_accurate),axis=1)
         now_passengers = []
         for row_index in range(len(now_station_routes_and_nums)):
             if len(now_station_routes_and_nums[row_index:row_index+1]['users'].values[0])!=0:
@@ -170,17 +170,17 @@ class simu():
                 #start_time = now_station_routes_and_nums[row_index:row_index+1]['minute_group'].values[0]
                 for user_instance in now_station_routes_and_nums[row_index:row_index+1]['users'].values[0]:
                     now_passengers.append({\
-                        'start_station':user_instance['this_od_trip_start_station'],\
+                        'start_station':user_instance['start_station'],\
                         'start_time':start_time,\
-                        'target_station':user_instance['this_od_end_station'],\
-                        'target_line':user_instance['this_od_by_line']})
+                        'target_station':user_instance['end_station'],\
+                        'target_line':user_instance['this_line']})
         #根据时间表为每个乘客添加时间表
         for user in now_passengers:
-            if user['start_station'] < user['target_station'] and self.time_schedule.time_table[user['target_line']]:
+            if user['start_station'] < user['target_station'] and self.time_schedule.time_table[user['target_line']] is not None:
                 time_df = self.time_schedule.time_table[user['target_line']]
-                time_df_column = time_df.loc[:,user['start_station']]
-                row_index = time_df_column[time_df_column>=user['start_time']].index.max()
-                column_index = time_df.columns.get_loc(user['start_station'])
+                time_df_column = time_df.loc[:,str(user['start_station'])]
+                row_index = time_df_column[time_df_column>=user['start_time']].index.min()
+                column_index = time_df.columns.get_loc(str(user['start_station']))
                 user['time_table'] = time_df.iloc[row_index,column_index:]
                 self.total_passengers.append(user)
             else:
@@ -271,8 +271,11 @@ def zip_target_station_line_func(x):
         return list(zip(x['this_od_end_station'],x['this_od_by_line']))
     else:
         return []
-def uniform_sample(x):
+def uniform_sample(x,time_accurate):
     if x['length']!=0:
-        return random.choices(x['od_trip'],k=int(x['count']))
+        #平均流量
+        average_nums = int(x['count'])/time_accurate
+        actual_nums = np.random.poisson(average_nums)
+        return random.choices(x['od_trip'],k=actual_nums)
     else:
         return []
