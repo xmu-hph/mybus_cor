@@ -165,6 +165,7 @@ class simu():
                                      left_on=['this_od_trip_start_station', 'hour', 'minute_group'],\
                                      right_on = ['this_od_trip_start_station', 'hour', 'minute_group'],\
                                      how='left').fillna(0)
+        
         now_station_routes_and_nums['users'] = now_station_routes_and_nums.apply(lambda x:uniform_sample(x,self.time_accurate),axis=1)
         now_passengers = []
         for row_index in range(len(now_station_routes_and_nums)):
@@ -172,7 +173,7 @@ class simu():
                 #print(merged_df[row_index:row_index+1]['users'].values[0])
                 start_station = now_station_routes_and_nums[row_index:row_index+1]['this_od_trip_start_station'].values[0]
                 start_time = str(self.now_hour)+':'+str(self.now_minute)+':00'
-                start_time = pd.to_datetime(start_time, format='%H:%M:%S', errors='coerce').dt.time
+                start_time = pd.to_datetime(start_time, format='%H:%M:%S', errors='coerce').time()
                 #start_time = now_station_routes_and_nums[row_index:row_index+1]['minute_group'].values[0]
                 for user_instance in now_station_routes_and_nums[row_index:row_index+1]['users'].values[0]:
                     now_passengers.append({\
@@ -225,12 +226,12 @@ class simu():
         self.station_people_nums = station_people_nums
         self.plot_folium()
     def plot_folium(self):
-        m = folium.Map(location=[26.315, 106.0], zoom_start=12, tiles='CartoDB positron')
+        m = folium.Map(location=[26.6, 106.6], zoom_start=12, tiles='CartoDB positron')
         max_flow = 100
         for station, coord in self.coords_dict.items():
             folium.CircleMarker(
                 location=coord,
-                radius=10,  # 增大标记大小
+                radius=5,  # 增大标记大小
                 popup=f'Station {station}',
                 tooltip=f'Station {station}',
                 color='blue',  # 边框颜色
@@ -240,15 +241,30 @@ class simu():
                     ).add_to(m)
         for route, flow in self.road_section_people_nums.items():
             start, end = route.split('_')
-            start_coord = self.coords_dict[start]
-            end_coord = self.coords_dict[end]
+            start_coord = self.coords_dict[int(start)]
+            end_coord = self.coords_dict[int(end)]
             folium.PolyLine(
                 locations=[start_coord, end_coord],
                 weight=10,  # 增加线条宽度
                 color=get_color(flow, max_flow),  # 线条颜色
                 opacity=0.7  # 透明度
                     ).add_to(m)
-        m.save(f'heatmap_{self.now_hour}_{self.now_minute}.html')
+        m.save(f'heatmap_{self.now_hour}_{self.now_minute}_flow.html')
+        del m
+        m = folium.Map(location=[26.6, 106.6], zoom_start=12, tiles='CartoDB positron')
+        max_flow = 100
+        for station, coord in self.coords_dict.items():
+            folium.CircleMarker(
+                location=coord,
+                radius=5,  # 增大标记大小
+                popup=f'Station {station}',
+                tooltip=f'Station {station}',
+                color='blue',  # 边框颜色
+                fill=True,
+                fill_color=get_color(self.station_people_nums[station], max_flow),  # 填充颜色
+                fill_opacity=0.7
+                    ).add_to(m)
+        m.save(f'heatmap_{self.now_hour}_{self.now_minute}_point.html')
         del m
 
     def find_leave_station(self,sorted_index_array:np.ndarray,specified_indices:list):
