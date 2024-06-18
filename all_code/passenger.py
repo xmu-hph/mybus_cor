@@ -9,6 +9,7 @@ from timetable import timetable
 from collections import defaultdict
 from loguru import logger
 import time
+import folium
 
 
 class simu():
@@ -38,8 +39,10 @@ class simu():
         logger.info(f"process time:{time.time()-process_start_time}")
 
     def process_data(self):
-        card_info_dataframe = pd.read_csv(self.card_data_path)
         bus_station_dataframe = pd.read_excel(self.bus_data_path,sheet_name='站点数据',header=0,engine='openpyxl')
+        station_id_position=bus_station_dataframe.groupby('station_name').agg({'longitude':list,'latitude':list}).reset_index()
+        station_id_position['position'] = station_id_position.apply(lambda x:list(zip(x['latitude'],x['longitude']))[0],axis=1)
+        card_info_dataframe = pd.read_csv(self.card_data_path)
         card_info_dataframe['custom_day'] = card_info_dataframe['custom_time'].apply(lambda x:x.split(' ')[0])
         card_info_dataframe['custom_precise_time'] = card_info_dataframe['custom_time'].apply(lambda x:x.split(' ')[1])
         card_info_dataframe.drop(labels=['custom_time','card_type','consume','data_src','data_load_time','partitionday'],axis=1,inplace=True)
@@ -69,7 +72,10 @@ class simu():
         with open(self.station_2_id_path, 'r') as file:
             station_2_id = json.load(file)
         self.station_2_id = station_2_id
-        
+        station_id_position['station_id'] = station_id_position.apply(lambda x:station_2_id[x['station_name']],axis=1)
+        coords_dict = {row['station_id']: row['position'] for idx, row in station_id_position.iterrows()}
+        self.coords_dict = coords_dict
+
         station_2_lines_order = {}#{station:{line1:[order],line2:[]}}
         for line_id in road_line_station_structure_setting.keys():
             line_stations = road_line_station_structure_setting[line_id]['stations']
@@ -187,20 +193,63 @@ class simu():
                 continue
     def observe(self):
         now_time = str(self.now_hour)+':'+str(self.now_minute)+':00'
-        now_time = pd.to_datetime(now_time, format='%H:%M:%S', errors='coerce').dt.time
+        now_time = pd.to_datetime(now_time, format='%H:%M:%S', errors='coerce').time()
         road_section_people_nums = defaultdict(int)
+        station_people_nums = defaultdict(int)
         for user in self.total_passengers:
-            if user['time_table'].iloc[-1]<now_time:
+            if user['time_table'].iloc[-1] is None or user['time_table'].iloc[-1]<now_time:
+                #print(user)
+                self.total_passengers.remove(user)
                 continue
             else:
-                column_index = user['time_table'][user['time_table']<=now_time].index.max()
-                #根据当前线路和站点编号来确定路段。
+                next_id = None
+                for i in range(len(user['time_table'])):
+                    if user['time_table'].iloc[i]>now_time:
+                        next_id = i
+                        break
+                if next_id is None:
+                    #说明已经走完
+                    self.total_passengers.remove(user)
+                    continue
                 this_line = user['target_line']
-                start_station = self.road_line_station_structure_setting['this_line']['stations'][column_index]
-                end_station = self.road_line_station_structure_setting['this_line']['stations'][column_index+1]
+                end_station = self.road_line_station_structure_setting[str(this_line)]['all_stations'][next_id]
+                if next_id == 0:
+                    #说明还没开始
+                    station_people_nums[self.station_2_id[end_station]] +=1
+                    continue
+                #根据当前线路和站点编号来确定路段。
+                start_station = self.road_line_station_structure_setting[str(this_line)]['all_stations'][next_id-1]
                 road_section = f"{self.station_2_id[start_station]}_{self.station_2_id[end_station]}"
                 road_section_people_nums[road_section] +=1
         self.road_section_people_nums = road_section_people_nums
+        self.station_people_nums = station_people_nums
+        self.plot_folium()
+    def plot_folium(self):
+        m = folium.Map(location=[26.315, 106.0], zoom_start=12, tiles='CartoDB positron')
+        max_flow = 100
+        for station, coord in self.coords_dict.items():
+            folium.CircleMarker(
+                location=coord,
+                radius=10,  # 增大标记大小
+                popup=f'Station {station}',
+                tooltip=f'Station {station}',
+                color='blue',  # 边框颜色
+                fill=True,
+                fill_color=get_color(self.station_people_nums[station], max_flow),  # 填充颜色
+                fill_opacity=0.7
+                    ).add_to(m)
+        for route, flow in self.road_section_people_nums.items():
+            start, end = route.split('_')
+            start_coord = self.coords_dict[start]
+            end_coord = self.coords_dict[end]
+            folium.PolyLine(
+                locations=[start_coord, end_coord],
+                weight=10,  # 增加线条宽度
+                color=get_color(flow, max_flow),  # 线条颜色
+                opacity=0.7  # 透明度
+                    ).add_to(m)
+        m.save(f'heatmap_{self.now_hour}_{self.now_minute}.html')
+        del m
 
     def find_leave_station(self,sorted_index_array:np.ndarray,specified_indices:list):
         # 找到指定索引组中在排序数组中的位置
@@ -279,3 +328,7 @@ def uniform_sample(x,time_accurate):
         return random.choices(x['od_trip'],k=actual_nums)
     else:
         return []
+def get_color(value, max_value):
+    colors = ['#FFEDA0', '#FEB24C', '#FD8D3C', '#FC4E2A', '#E31A1C', '#BD0026', '#800026']
+    index = int(min((value / max_value),1) * (len(colors) - 1))
+    return colors[index]
