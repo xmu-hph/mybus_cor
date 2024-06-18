@@ -10,6 +10,8 @@ from collections import defaultdict
 from loguru import logger
 import time
 import folium
+import matplotlib.pyplot as plt
+from mpl_toolkits.basemap import Basemap
 
 
 class simu():
@@ -37,6 +39,7 @@ class simu():
         process_start_time = time.time()
         self.process_data()
         logger.info(f"process time:{time.time()-process_start_time}")
+        self.total_frame = []
 
     def process_data(self):
         bus_station_dataframe = pd.read_excel(self.bus_data_path,sheet_name='站点数据',header=0,engine='openpyxl')
@@ -197,15 +200,20 @@ class simu():
         now_time = pd.to_datetime(now_time, format='%H:%M:%S', errors='coerce').time()
         road_section_people_nums = defaultdict(int)
         station_people_nums = defaultdict(int)
+        self.total_passengers = [
+            user for user in self.total_passengers
+            if not (user['time_table'].isna().any() or user['time_table'].isnull().any() or pd.isna(user['time_table'].iloc[-1] if not user['time_table'].empty else pd.NaT) or user['time_table'].iloc[-1] < now_time)
+            ]
         for user in self.total_passengers:
-            if user['time_table'].iloc[-1] is None or user['time_table'].iloc[-1]<now_time:
+            #print(user['time_table'])
+            if pd.isna(user['time_table'].iloc[-1]) or user['time_table'].iloc[-1]<now_time:
                 #print(user)
                 self.total_passengers.remove(user)
                 continue
             else:
                 next_id = None
                 for i in range(len(user['time_table'])):
-                    if user['time_table'].iloc[i]>now_time:
+                    if (not pd.isna(user['time_table'].iloc[i])) and user['time_table'].iloc[i]>now_time:
                         next_id = i
                         break
                 if next_id is None:
@@ -249,7 +257,7 @@ class simu():
                 color=get_color(flow, max_flow),  # 线条颜色
                 opacity=0.7  # 透明度
                     ).add_to(m)
-        m.save(f'heatmap_{self.now_hour}_{self.now_minute}_flow.html')
+        m.save(f'./heatmap_flow_folium/heatmap_{self.now_hour}_{self.now_minute}_flow.html')
         del m
         m = folium.Map(location=[26.6, 106.6], zoom_start=12, tiles='CartoDB positron')
         max_flow = 100
@@ -264,8 +272,29 @@ class simu():
                 fill_color=get_color(self.station_people_nums[station], max_flow),  # 填充颜色
                 fill_opacity=0.7
                     ).add_to(m)
-        m.save(f'heatmap_{self.now_hour}_{self.now_minute}_point.html')
+        m.save(f'./heatmap_point_folium/heatmap_{self.now_hour}_{self.now_minute}_point.html')
         del m
+        fig, ax = plt.subplots(figsize=(50, 50))
+        m = Basemap(projection='merc', llcrnrlat=26.45, urcrnrlat=26.65, llcrnrlon=106.60, urcrnrlon=106.80, resolution='i', ax=ax)
+        m.drawcoastlines()
+        m.drawcountries()
+        m.drawmapboundary(fill_color='aqua')
+        m.fillcontinents(color='white', lake_color='aqua')
+        for station, coord in self.coords_dict.items():
+            x, y = m(coord[1], coord[0])
+            m.plot(x, y, 'o', markersize=10, color=get_color(self.station_people_nums[station], max_flow), label=f'Station {station}')
+        for route, flow in self.road_section_people_nums.items():
+            start, end = map(int, route.split('_'))
+            start_coord = self.coords_dict[int(start)]
+            end_coord = self.coords_dict[int(end)]
+            x_start, y_start = m(start_coord[1], start_coord[0])
+            x_end, y_end = m(end_coord[1], end_coord[0])
+            m.plot([x_start, x_end], [y_start, y_end], color=get_color(flow, max_flow), linewidth=5)
+        plt.savefig(f"./heatmap_flow_png/heatmap_{self.now_hour}_{self.now_minute}_flow.png", dpi=300, bbox_inches='tight')
+        plt.close(fig)
+        self.total_frame.append(f"./heatmap_flow_png/heatmap_{self.now_hour}_{self.now_minute}_flow.png")
+
+
 
     def find_leave_station(self,sorted_index_array:np.ndarray,specified_indices:list):
         # 找到指定索引组中在排序数组中的位置
