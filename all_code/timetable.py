@@ -43,8 +43,14 @@ class timetable():
             station_2_id = json.load(file)
         self.station_2_id = station_2_id
         line_station_number_sequen_dataframe = \
-                    bus_station_dataframe.groupby(['line_identity','station_number']).agg({'station_name':list,'station_identity':list}).reset_index()
-        line_station_number_sequen_dataframe['length'] = line_station_number_sequen_dataframe['station_identity'].apply(lambda x:len(x))
+                    bus_station_dataframe.groupby(['line_identity','station_identity']).agg({'station_name':list}).reset_index()
+        line_station_number_sequen_dataframe['length'] = line_station_number_sequen_dataframe['station_name'].apply(lambda x:len(x))
+        line_station_number_sequen_dataframe['station_name'] = line_station_number_sequen_dataframe['station_name'].apply(lambda x:x[0])
+        line_station_number_sequen_dataframe = line_station_number_sequen_dataframe.\
+            groupby('line_identity').agg({'station_identity':list,\
+                                          'station_name':list}).reset_index()
+        line_station_number_sequen_dataframe['station_name'] = line_station_number_sequen_dataframe.apply(lambda x:list(zip(x['station_identity'],x['station_name'])),axis=1)
+        line_station_number_sequen_dataframe['station_name'] = line_station_number_sequen_dataframe['station_name'].apply(lambda x:sorted(x,key=lambda y:y[0]))
         road_section_2_lines = {}#格式：{shangdi_longze:[13,15]}路段到线路
         #逐线路的添加路段
         for row_index in range(len(line_station_number_sequen_dataframe)):
@@ -54,8 +60,8 @@ class timetable():
             for start_order in range(len(stations_list)-1):
                 start_station = stations_list[start_order]
                 end_station = stations_list[start_order+1]
-                start_station_order = station_2_id[start_station]
-                end_station_order = station_2_id[end_station]
+                start_station_order = station_2_id[start_station[1]]
+                end_station_order = station_2_id[end_station[1]]
                 road_section_2_lines_key = f"{start_station_order}_{end_station_order}"
                 if road_section_2_lines_key in road_section_2_lines:
                     road_section_2_lines[road_section_2_lines_key].append(line_identity)
@@ -70,6 +76,13 @@ class timetable():
         card_info_dataframe['custom_precise_time'] = card_info_dataframe['custom_time'].apply(lambda x:x.split(' ')[1])
         card_info_dataframe.drop(labels=['custom_time','card_type','consume','data_src','data_load_time','partitionday'],axis=1,inplace=True)
         day_0929_dataframe = card_info_dataframe[card_info_dataframe['custom_day']=='2023-09-29']
+        def judge_whether_in(x,road_line_station_structure_setting):
+            if str(x['line_identity']) in road_line_station_structure_setting and str(x['station_identity']) in road_line_station_structure_setting[str(x['line_identity'])]['stations']:
+                return True
+            else:
+                return False
+        day_0929_dataframe['judge'] = day_0929_dataframe.apply(lambda x:judge_whether_in(x,road_line_station_structure_setting),axis=1)
+        day_0929_dataframe = day_0929_dataframe[day_0929_dataframe['judge']].reset_index(drop=True)
         day_0929_line_car_dataframe = day_0929_dataframe.groupby('line_identity').\
                     agg({'car_identity':set},axis=1).reset_index()
         day_0929_line_car_dataframe['car_identity'] = \
@@ -140,7 +153,7 @@ class timetable():
         trip_1_0929 = \
                     every_user_all_trips_dataframe_0929\
                     [every_user_all_trips_dataframe_0929\
-                    ['trip_length'] ==1]
+                    ['trip_length'] ==1].reset_index(drop=True)
         trip_1_0929['trip'] = trip_1_0929.\
                     apply(lambda x:list(zip(x['custom_precise_time'],\
                             x['line_identity'],x['station_identity'],x['car_identity'])),axis=1)
@@ -154,7 +167,7 @@ class timetable():
         trip_1_0929_exploded['this_od_by_car']= \
                     trip_1_0929_exploded['trip'].apply(lambda x:x[3])
         need_attrs = ['card_identity','this_od_by_line','this_od_by_car','this_od_trip_start_station','this_od_start_time']
-        match_attrs = ['card_identity','line_identity','car_identity','station_identity','custom_precise_time']
+        #match_attrs = ['card_identity','line_identity','car_identity','station_identity','custom_precise_time']
         
         temp1 = trip_great_than_2_0929_exploded[\
                     need_attrs]
@@ -195,7 +208,12 @@ class timetable():
             #row_station_id_2_arrive_time = {}
             for row_id in range(len(remove_dupilicate)):
                 row = remove_dupilicate[row_id]#每一个运行时间表
-                temp_arrive_time_2_station_id = dict(zip(line_info_stations_dict.keys(),[None]*len(line_info_stations_dict.keys())))
+                columns_list = list(line_info_stations_dict.keys())
+                columns_list = sorted(columns_list,key=lambda x:int(x))
+                #columns_list.sort(key=lambda x:int(x))
+                temp_arrive_time_2_station_id = dict(zip(\
+                    columns_list,\
+                        [None]*len(columns_list)))
                 for data_instance in row:
                     time = data_instance[0]
                     station_id = data_instance[1]
@@ -500,15 +518,6 @@ def check_time_relationship(row):
             if pd.notnull(row.iloc[c]):
                 prev_col = row.iloc[c]
                 break
-        # 找到当前列的后一列
-        next_col = None
-        for c in range(col + 1, len(row)):
-            if pd.notnull(row.iloc[c]):
-                next_col = row.iloc[c]
-                break
-        # 检查前后关系
-        if prev_col and next_col:
-            if not (time_to_seconds(prev_col) <= time_to_seconds(current_time) <= time_to_seconds(next_col)):
-                # 如果时间不满足前后关系，置为空
-                row.iloc[col] = pd.NaT  # 或者可以设置为 None 或其他你需要的值
+        if prev_col and (not (time_to_seconds(prev_col) <= time_to_seconds(current_time))):
+            row.iloc[col] = pd.NaT
     return row

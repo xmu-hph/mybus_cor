@@ -1,7 +1,6 @@
 import pandas as pd
 import numpy as np
 import json
-import csv
 import random
 # 设置随机种子
 random.seed(42)
@@ -36,12 +35,25 @@ class simu():
         self.total_passengers = []
         self.time_schedule = time_schedule
         self.road_section_people_nums = defaultdict(int)
+        self.station_people_nums = defaultdict(int)
         process_start_time = time.time()
         self.process_data()
         logger.info(f"process time:{time.time()-process_start_time}")
         self.total_frame = []
 
     def process_data(self):
+        with open(self.road_line_station_setting_path, 'r') as f:
+            road_line_station_structure_setting = json.load(f)
+        self.road_line_station_structure_setting = road_line_station_structure_setting
+        station_distance_rank_index_list = np.loadtxt(self.station_distance_rank_path,delimiter=',',dtype=int)
+        self.station_distance_rank_index_list = station_distance_rank_index_list
+        with open(self.id_2_station_path, 'r') as file:
+            id_2_station = json.load(file)
+            id_2_station = {int(key): value for key, value in id_2_station.items()}
+        self.id_2_station = id_2_station
+        with open(self.station_2_id_path, 'r') as file:
+            station_2_id = json.load(file)
+        self.station_2_id = station_2_id
         bus_station_dataframe = pd.read_excel(self.bus_data_path,sheet_name='站点数据',header=0,engine='openpyxl')
         station_id_position=bus_station_dataframe.groupby('station_name').agg({'longitude':list,'latitude':list}).reset_index()
         station_id_position['position'] = station_id_position.apply(lambda x:list(zip(x['latitude'],x['longitude']))[0],axis=1)
@@ -50,6 +62,13 @@ class simu():
         card_info_dataframe['custom_precise_time'] = card_info_dataframe['custom_time'].apply(lambda x:x.split(' ')[1])
         card_info_dataframe.drop(labels=['custom_time','card_type','consume','data_src','data_load_time','partitionday'],axis=1,inplace=True)
         day_0929_dataframe = card_info_dataframe[card_info_dataframe['custom_day']=='2023-09-29']
+        def judge_whether_in(x,road_line_station_structure_setting):
+            if str(x['line_identity']) in road_line_station_structure_setting and str(x['station_identity']) in road_line_station_structure_setting[str(x['line_identity'])]['stations']:
+                return True
+            else:
+                return False
+        day_0929_dataframe['judge'] = day_0929_dataframe.apply(lambda x:judge_whether_in(x,road_line_station_structure_setting),axis=1)
+        day_0929_dataframe = day_0929_dataframe[day_0929_dataframe['judge']].reset_index(drop=True)
         every_user_all_trips_dataframe_0929 = \
                     day_0929_dataframe.groupby('card_identity').agg({'custom_precise_time':list, \
                                                 'line_identity':list, \
@@ -63,18 +82,6 @@ class simu():
         trip_great_than_2_0929['trip'] = trip_great_than_2_0929.apply(lambda x:list(zip(x['custom_precise_time'],x['line_identity'],x['station_identity'])),axis=1)
         trip_great_than_2_0929['ordered_trips'] = \
                     trip_great_than_2_0929['trip'].apply(lambda x:sorted(x,key=lambda x:x[0]))
-        with open(self.road_line_station_setting_path, 'r') as f:
-            road_line_station_structure_setting = json.load(f)
-        self.road_line_station_structure_setting = road_line_station_structure_setting
-        station_distance_rank_index_list = np.loadtxt(self.station_distance_rank_path,delimiter=',',dtype=int)
-        self.station_distance_rank_index_list = station_distance_rank_index_list
-        with open(self.id_2_station_path, 'r') as file:
-            id_2_station = json.load(file)
-            id_2_station = {int(key): value for key, value in id_2_station.items()}
-        self.id_2_station = id_2_station
-        with open(self.station_2_id_path, 'r') as file:
-            station_2_id = json.load(file)
-        self.station_2_id = station_2_id
         station_id_position['station_id'] = station_id_position.apply(lambda x:station_2_id[x['station_name']],axis=1)
         coords_dict = {row['station_id']: row['position'] for idx, row in station_id_position.iterrows()}
         self.coords_dict = coords_dict
@@ -189,6 +196,8 @@ class simu():
             if user['start_station'] < user['target_station'] and self.time_schedule.time_table[user['target_line']] is not None:
                 time_df = self.time_schedule.time_table[user['target_line']]
                 time_df_column = time_df.loc[:,str(user['start_station'])]
+                if len(time_df_column[time_df_column>=user['start_time']])<1:
+                    continue
                 row_index = time_df_column[time_df_column>=user['start_time']].index.min()
                 column_index = time_df.columns.get_loc(str(user['start_station']))
                 user['time_table'] = time_df.iloc[row_index,column_index:]
@@ -208,7 +217,7 @@ class simu():
             #print(user['time_table'])
             if pd.isna(user['time_table'].iloc[-1]) or user['time_table'].iloc[-1]<now_time:
                 #print(user)
-                self.total_passengers.remove(user)
+                #self.total_passengers.remove(user)
                 continue
             else:
                 next_id = None
@@ -218,7 +227,7 @@ class simu():
                         break
                 if next_id is None:
                     #说明已经走完
-                    self.total_passengers.remove(user)
+                    #self.total_passengers.remove(user)
                     continue
                 this_line = user['target_line']
                 end_station = self.road_line_station_structure_setting[str(this_line)]['all_stations'][next_id]

@@ -1,0 +1,1 @@
+{"global_station_id": [2], "hour": [9], "minute_group": [6], "od_trip": [[{"start_station": 6, "end_station": 6, "this_line": 253}, {"start_station": 6, "end_station": 12, "this_line": 253}, {"start_station": 5, "end_station": 9, "this_line": 234}, {"start_station": 6, "end_station": 20, "this_line": 253}]]}
